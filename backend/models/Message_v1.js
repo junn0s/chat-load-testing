@@ -34,7 +34,7 @@ const MessageSchema = new mongoose.Schema({
   },
   aiType: {
     type: String,
-    enum: ['wayneAI', 'consultingAI', 'AIexpert'], // ✅ AIexpert 추가됨
+    enum: ['wayneAI', 'consultingAI'],
     required: function() { 
       return this.type === 'ai'; 
     }
@@ -90,7 +90,7 @@ const MessageSchema = new mongoose.Schema({
   }
 });
 
-// 인덱스
+// 복합 인덱스 설정
 MessageSchema.index({ room: 1, timestamp: -1 });
 MessageSchema.index({ room: 1, isDeleted: 1 });
 MessageSchema.index({ 'readers.userId': 1 });
@@ -99,7 +99,7 @@ MessageSchema.index({ type: 1 });
 MessageSchema.index({ timestamp: -1 });
 MessageSchema.index({ 'reactions.userId': 1 });
 
-// 읽음 처리
+// 읽음 처리 Static 메소드 개선
 MessageSchema.statics.markAsRead = async function(messageIds, userId) {
   if (!messageIds?.length || !userId) return;
 
@@ -134,7 +134,7 @@ MessageSchema.statics.markAsRead = async function(messageIds, userId) {
   }
 };
 
-// 리액션
+// 리액션 처리 메소드 개선
 MessageSchema.methods.addReaction = async function(emoji, userId) {
   try {
     if (!this.reactions) {
@@ -188,13 +188,13 @@ MessageSchema.methods.removeReaction = async function(emoji, userId) {
   }
 };
 
-// soft delete
+// 메시지 소프트 삭제 메소드 추가
 MessageSchema.methods.softDelete = async function() {
   this.isDeleted = true;
   await this.save();
 };
 
-// 파일 삭제 후크
+// 메시지 삭제 전 후크 개선
 MessageSchema.pre('remove', async function(next) {
   try {
     if (this.type === 'file' && this.file) {
@@ -212,7 +212,7 @@ MessageSchema.pre('remove', async function(next) {
   }
 });
 
-// 저장 전 처리
+// 메시지 저장 전 후크 개선
 MessageSchema.pre('save', function(next) {
   try {
     if (this.content && this.type !== 'file') {
@@ -233,14 +233,17 @@ MessageSchema.pre('save', function(next) {
   }
 });
 
-// toJSON 개선
+// JSON 변환 메소드 개선
 MessageSchema.methods.toJSON = function() {
   try {
     const obj = this.toObject();
+    
+    // 불필요한 필드 제거
     delete obj.__v;
     delete obj.updatedAt;
     delete obj.isDeleted;
-
+    
+    // reactions Map을 일반 객체로 변환
     if (obj.reactions) {
       obj.reactions = Object.fromEntries(obj.reactions);
     }
