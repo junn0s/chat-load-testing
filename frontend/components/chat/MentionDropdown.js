@@ -1,5 +1,5 @@
 import React, { useCallback, memo, useRef, useEffect } from "react";
-import { Avatar } from "@goorm-dev/vapor-core";
+import { Avatar } from "@vapor-ui/core";
 import {
   getAIAvatarStyles,
   generateColorFromEmail,
