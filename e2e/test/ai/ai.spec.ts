@@ -23,12 +23,7 @@ test.describe("AI 상호작용 테스트", () => {
     );
     await expect(page.locator(".message-ai").last()).toBeVisible();
 
-    // AIexpert와 대화
-    await helpers.sendAIMessage(
-      page,
-      "AI 기술에 대한 답변이 필요해요",
-      "AIexpert"
-    );
+    await helpers.sendAIMessage(page, "AI 기술에 대한 답변이 필요해요", "taxAI");
     await expect(page.locator(".message-ai").last()).toBeVisible();
 
     // 기본값(wayneAI) 사용

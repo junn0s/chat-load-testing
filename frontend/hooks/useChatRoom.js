@@ -1,883 +1,588 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useRouter } from 'next/router';
-import socketService from '../services/socket';
 import authService from '../services/authService';
-import fileService from '../services/fileService';
+import socketService from '../services/socket';
+import { useFileHandling } from './useFileHandling';
+import { useMessageHandling } from './useMessageHandling';
+import { useReactionHandling } from './useReactionHandling';
+import { useAIMessageHandling } from './useAIMessageHandling';
+import { useScrollHandling } from './useScrollHandling';
+import { useSocketHandling } from './useSocketHandling';
+import { useRoomHandling } from './useRoomHandling';
 import { Toast } from '../components/Toast';
+
+const CLEANUP_REASONS = {
+  DISCONNECT: 'disconnect',
+  MANUAL: 'manual',
+  RECONNECT: 'reconnect',
+  UNMOUNT: 'unmount',
+  ERROR: 'error'
+};
 
 export const useChatRoom = () => {
   const router = useRouter();
   const [room, setRoom] = useState(null);
-  const [message, setMessage] = useState('');
   const [messages, setMessages] = useState([]);
-  const [showEmojiPicker, setShowEmojiPicker] = useState(false);
-  const [showMentionList, setShowMentionList] = useState(false);
-  const [mentionFilter, setMentionFilter] = useState('');
-  const [mentionIndex, setMentionIndex] = useState(0);
   const [currentUser, setCurrentUser] = useState(null);
   const [error, setError] = useState('');
-  const [connected, setConnected] = useState(false);
   const [loading, setLoading] = useState(true);
-  const [filePreview, setFilePreview] = useState(null);
-  const [uploading, setUploading] = useState(false);
-  const [uploadProgress, setUploadProgress] = useState(0);
-  const [uploadError, setUploadError] = useState(null);
-  const [streamingMessages, setStreamingMessages] = useState({});
-  const [retryCount, setRetryCount] = useState(0);
-  const [isNearBottom, setIsNearBottom] = useState(true);
-  const [hasMoreMessages, setHasMoreMessages] = useState(true);
-  const [loadingMessages, setLoadingMessages] = useState(false);
-  const [initialScrollDone, setInitialScrollDone] = useState(false);
-  const maxRetries = 3;
-
-  const messagesEndRef = useRef(null);
+  const [connectionStatus, setConnectionStatus] = useState('checking');
+  const [messageLoadError, setMessageLoadError] = useState(null);
+  const [isInitialized, setIsInitialized] = useState(false);
+  
+  // Refs
   const messageInputRef = useRef(null);
-  const fileInputRef = useRef(null);
-  const socketRef = useRef(null);
-  const lastScrollPositionRef = useRef(0);
-  const scrollPositionRef = useRef(null);
+  const messageLoadAttemptRef = useRef(0);
+  const mountedRef = useRef(true);
+  const initializingRef = useRef(false);
+  const setupCompleteRef = useRef(false);
+  const socketInitializedRef = useRef(false);
+  const cleanupInProgressRef = useRef(false);
+  const cleanupCountRef = useRef(0);
+  const userRooms = useRef(new Map());
+  const previousMessagesRef = useRef(new Set());
+  const messageProcessingRef = useRef(false);
+  const initialLoadCompletedRef = useRef(false);
+  const scrollPositionRef = useRef(0);
+  const processedMessageIds = useRef(new Set());
+  const loadMoreTimeoutRef = useRef(null);
   const previousScrollHeightRef = useRef(0);
   const isLoadingRef = useRef(false);
-  const loadingTimeoutRef = useRef(null);
-  const scrollTimeoutRef = useRef(null);
-  const initialScrollRef = useRef(false);
-  const lastMessageCountRef = useRef(0);
+  const loadMoreTriggeredRef = useRef(false);
 
-  // 리액션 상태 관리를 위한 핸들러
-  const handleReactionUpdate = useCallback(({ messageId, reactions }) => {
-    setMessages(prev => prev.map(msg => 
-      msg._id === messageId ? { ...msg, reactions } : msg
-    ));
-  }, []);
+  // Socket handling setup
+  const {
+    connected,
+    socketRef,
+    handleConnectionError,
+    handleReconnect,
+    setConnected
+  } = useSocketHandling(router);
 
-  const scrollToBottom = useCallback((behavior = 'smooth') => {
-    if (!messagesEndRef.current) return;
-    
-    const messageList = messagesEndRef.current;
-    const scrollHeight = messageList.scrollHeight;
-    const height = messageList.clientHeight;
-    const maxScrollTop = scrollHeight - height;
-    
-    if (isNearBottom || behavior === 'auto') {
-      requestAnimationFrame(() => {
-        messageList.scrollTop = maxScrollTop > 0 ? maxScrollTop : 0;
-      });
-    }
-  }, [isNearBottom]);
+  // Scroll handling hook
+  const {
+    isNearBottom,
+    hasMoreMessages,
+    loadingMessages,
+    messagesEndRef,
+    scrollToBottom,
+    handleScroll,
+    setHasMoreMessages,
+    setLoadingMessages
+  } = useScrollHandling(socketRef, router, messages);  
   
-  const handleLoadMore = useCallback(async () => {  
-    if (!hasMoreMessages || loadingMessages || isLoadingRef.current) {
-      console.log('Load more blocked:', {
-        hasMoreMessages,
-        loadingMessages,
-        isLoading: isLoadingRef.current
-      });
-      return;
-    }
-
-    const container = messagesEndRef.current;
-    if (!container) return;
-
-    try {
-      // 이전 스크롤 위치 저장
-      const currentScrollHeight = container.scrollHeight;
-      previousScrollHeightRef.current = currentScrollHeight;
-
-      // 로딩 상태 설정
-      isLoadingRef.current = true;
-      setLoadingMessages(true);
-
-      // 소켓 연결 확인 및 재연결 시도
-      if (!socketRef.current?.connected) {
-        await new Promise((resolve) => {
-          socketRef.current?.once('connect', resolve);
-          socketRef.current?.connect();
-        });
-      }
-
-      // 로딩 타임아웃 설정
-      if (loadingTimeoutRef.current) {
-        clearTimeout(loadingTimeoutRef.current);
-      }
-      
-      loadingTimeoutRef.current = setTimeout(() => {
-        isLoadingRef.current = false;
-        setLoadingMessages(false);
-        console.log('Message loading timeout');
-      }, 10000); // 10초 타임아웃
-
-      console.log('Loading more messages:', {
-        currentScrollHeight,
-        firstMessageTimestamp: messages[0]?.timestamp
-      });
-
-      // 메시지 로드 요청
-      socketRef.current.emit('fetchPreviousMessages', {
-        roomId: router.query.room,
-        before: messages[0]?.timestamp
-      });
-
-      // 디바운스된 스크롤 이벤트 처리를 위한 플래그 설정
-      setIsNearBottom(false);
-
-    } catch (error) {
-      console.error('Load more error:', error);
-      isLoadingRef.current = false;
-      setLoadingMessages(false);
-      setError(error.message || '이전 메시지를 불러오는데 실패했습니다.');
-
-      // 소켓 재연결 시도
-      if (!socketRef.current?.connected) {
-        try {
-          await socketRef.current?.connect();
-        } catch (reconnectError) {
-          console.error('Socket reconnection failed:', reconnectError);
-        }
-      }
-    } finally {
-      if (loadingTimeoutRef.current) {
-        clearTimeout(loadingTimeoutRef.current);
-      }
-    }
-  }, [hasMoreMessages, loadingMessages, messages, router.query.room]);
-
-  // 스크롤 이벤트 핸들러 개선
-  const handleScroll = useCallback((event) => {
-    if (scrollTimeoutRef.current) {
-      clearTimeout(scrollTimeoutRef.current);
-    }
-
-    scrollTimeoutRef.current = setTimeout(() => {
-      const container = messagesEndRef.current;
-      if (!container || loadingMessages || !hasMoreMessages || isLoadingRef.current) {
-        return;
-      }
-
-      const { scrollTop, scrollHeight, clientHeight } = container;
-      const distanceFromBottom = scrollHeight - (scrollTop + clientHeight);
-      
-      // 스크롤 위치가 상단에 가까워지면 추가 메시지 로드
-      if (scrollTop < 50) {
-        console.log('Reached scroll threshold, attempting to load more messages');
-        handleLoadMore();
-      }
-
-      setIsNearBottom(distanceFromBottom < 100);
-    }, 150); // 디바운스 시간을 150ms로 설정
-  }, [loadingMessages, hasMoreMessages, handleLoadMore]);
-
-  useEffect(() => {
-    if (!loadingMessages && previousScrollHeightRef.current > 0) {
-      const container = messagesEndRef.current;
-      if (!container) return;
-
-      requestAnimationFrame(() => {
-        const newScrollHeight = container.scrollHeight;
-        const scrollDiff = newScrollHeight - previousScrollHeightRef.current;
-
-        console.log('Restoring scroll position:', {
-          previousHeight: previousScrollHeightRef.current,
-          newHeight: newScrollHeight,
-          diff: scrollDiff
-        });
-
-        if (scrollDiff > 0) {
-          container.scrollTop = scrollDiff;
-        }
-
-        previousScrollHeightRef.current = 0;
-        isLoadingRef.current = false;
-      });
-    }
-  }, [loadingMessages]);
-
-  useEffect(() => {
-    const messageList = messagesEndRef.current;
-    if (!messageList || !initialScrollDone) return;
-
-    const scrollListener = () => {
-      handleScroll();
-    };
-
-    messageList.addEventListener('scroll', scrollListener, { passive: true });
-    
-    return () => {
-      if (scrollTimeoutRef.current) {
-        clearTimeout(scrollTimeoutRef.current);
-      }
-      messageList.removeEventListener('scroll', scrollListener);
-    };
-  }, [handleScroll, initialScrollDone]);
-
-  useEffect(() => {
-    if (messages.length > 0 && !initialScrollDone) {
-      scrollToBottom('auto');
-      setInitialScrollDone(true);
-    }
-  }, [messages, initialScrollDone, scrollToBottom]);
-
-  useEffect(() => {
-    const user = authService.getCurrentUser();
-    if (!user) {
-      router.replace('/?redirect=' + router.asPath);
-      return;
-    }
-    setCurrentUser(user);
-  }, [router]);
-
-  const handleSessionError = useCallback(async () => {
-    try {
-      const refreshed = await authService.refreshToken();
-      if (refreshed) {
-        return true;
-      }
-    } catch (refreshError) {
-      console.error('Token refresh failed:', refreshError);
-    }
-    
-    authService.logout();
-    router.replace('/?redirect=' + router.asPath);
-    return false;
-  }, [router]);
-
-  const handleReactionAdd = useCallback(async (messageId, reaction) => {
-    try {
-      if (!socketRef.current?.connected) {
-        throw new Error('Socket not connected');
-      }
-      await socketRef.current.emit('messageReaction', {
-        messageId,
-        reaction,
-        type: 'add'
-      });
-    } catch (error) {
-      console.error('Add reaction error:', error);
-      Toast.error('리액션 추가에 실패했습니다.');
-    }
-  }, []);
-
-  const handleReactionRemove = useCallback(async (messageId, reaction) => {
-    try {
-      if (!socketRef.current?.connected) {
-        throw new Error('Socket not connected');
-      }
-      await socketRef.current.emit('messageReaction', {
-        messageId,
-        reaction,
-        type: 'remove'
-      });
-    } catch (error) {
-      console.error('Remove reaction error:', error);
-      Toast.error('리액션 제거에 실패했습니다.');
-    }
-  }, []);
-  
-  const fetchRoomData = async (roomId) => {
-    if (!roomId || !currentUser?.token) {
-      router.replace('/?redirect=' + router.asPath);
-      return;
-    }
-
-    try {
-      const response = await fetch(
-        `${process.env.NEXT_PUBLIC_API_URL}/api/rooms/${roomId}`,
-        {
-          headers: {
-            'Content-Type': 'application/json',
-            'x-auth-token': currentUser.token,
-            'x-session-id': currentUser.sessionId
-          }
-        }
-      );
-
-      if (!response.ok) {
-        const errorData = await response.json();
-        
-        if (response.status === 401 || 
-            errorData.message?.includes('세션') || 
-            errorData.message?.includes('인증') || 
-            errorData.message?.includes('토큰')) {
-          await handleSessionError();
-          return;
-        }
-        
-        Toast.error(errorData.message || '채팅방 정보를 불러오는데 실패했습니다.');
-        setLoading(false);
-        return;
-      }
-
-      const result = await response.json();
-      setRoom(result.data);
-      setLoading(false);
-
-    } catch (error) {
-      console.error('Room fetch error:', error);
-      
-      if (!navigator.onLine) {
-        Toast.error('인터넷 연결을 확인해주세요.');
-      } else {
-        Toast.error('채팅방 정보를 불러오는데 실패했습니다.');
-      }
-      
-      setLoading(false);
-    }
-  };
-
-  const handlePreviousMessagesLoaded = useCallback(({ messages: newMessages, hasMore, oldestTimestamp }) => {
-    console.log("handlePreviousMessagesLoaded 0");
-    
-    if (!newMessages?.length) return;
-
-    console.log("handlePreviousMessagesLoaded 1");
-    
-    setMessages(prev => {
-      // 중복 메시지 제거를 위해 Map 사용
-      const messageMap = new Map(prev.map(msg => [msg._id, msg]));
-
-      // 새로운 메시지들을 Map에 추가
-      newMessages.forEach(msg => {
-        if (!messageMap.has(msg._id)) {
-          messageMap.set(msg._id, {
-            ...msg,
-            reactions: msg.reactions || {}
-          });
-        }
-      });
-
-      // Map을 배열로 변환하고 timestamp로 정렬
-      const combinedMessages = Array.from(messageMap.values())
-        .sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
-
-      return combinedMessages;
-    });
-
-    console.log("handlePreviousMessagesLoaded 2");
-    
-    setHasMoreMessages(hasMore);
-    setLoadingMessages(false);
-
-    console.log('Previous messages loaded:', {
-      newCount: newMessages.length,
-      hasMore,
-      oldestTimestamp
-    });
-  }, []);
-
-  const handleSocketMessage = useCallback((newMessage) => {
-    if (newMessage.type !== 'ai') {
-      setMessages(prev => {
-        const isDuplicate = prev.some(msg => 
-          msg._id === newMessage._id || 
-          (msg.timestamp === newMessage.timestamp && 
-           msg.content === newMessage.content)
-        );
-        if (isDuplicate) return prev;
-        return [...prev, {
-          ...newMessage,
-          reactions: newMessage.reactions || {}
-        }];
-      });
-      scrollToBottom();
-    }
-  }, [scrollToBottom]);
-
-  const handleInitialMessages = useCallback(({ messages, hasMore, activeStreams }) => {
-    setMessages(messages.map(msg => ({
-      ...msg,
-      reactions: msg.reactions || {}
-    })));
-    setHasMoreMessages(hasMore);
-    if (activeStreams?.length > 0) {
-      const streamingMessagesMap = activeStreams.reduce((acc, stream) => ({
-        ...acc,
-        [stream._id]: {
-          ...stream,
-          reactions: {}
-        }
-      }), {});
-      setStreamingMessages(streamingMessagesMap);
-    }
-    scrollToBottom('auto');
-    setLoading(false);
-  }, [scrollToBottom]);
-
-  const handleAIMessageStart = useCallback((data) => {
-    setStreamingMessages(prev => ({
-      ...prev,
-      [data.messageId]: {
-        _id: data.messageId,
-        type: 'ai',
-        aiType: data.aiType,
-        content: '',
-        timestamp: new Date(data.timestamp),
-        isStreaming: true,
-        reactions: {}
-      }
-    }));
-    scrollToBottom('auto');
-  }, [scrollToBottom]);
-
-  const handleAIMessageChunk = useCallback((data) => {
-    if (!data.messageId) return;
-
-    setStreamingMessages(prev => {
-      const currentMessage = prev[data.messageId];
-      if (!currentMessage) return prev;
-
-      return {
-        ...prev,
-        [data.messageId]: {
-          ...currentMessage,
-          content: data.fullContent || currentMessage.content + (data.currentChunk || ''),
-          isCodeBlock: data.isCodeBlock
-        }
-      };
-    });
-    
-    if (isNearBottom) {
-      scrollToBottom();
-    }
-  }, [scrollToBottom, isNearBottom]);
-
-  const handleAIMessageComplete = useCallback((data) => {
-    setStreamingMessages(prev => {
-      const { [data.messageId]: completed, ...rest } = prev;
-      return rest;
-    });
-
-    setMessages(prev => {
-      const isDuplicate = prev.some(msg => msg._id === data.messageId);
-      if (isDuplicate) return prev;
-
-      return [...prev, {
-        _id: data.messageId,
-        type: 'ai',
-        aiType: data.aiType,
-        content: data.content,
-        timestamp: new Date(data.timestamp),
-        isComplete: true,
-        query: data.query,
-        reactions: {}
-      }];
-    });
-    
-    scrollToBottom();
-  }, [scrollToBottom]);
-
-  const handleAIMessageError = useCallback((data) => {
-    console.error('AI message error:', data);
-    setStreamingMessages(prev => {
-      const { [data.messageId]: failed, ...rest } = prev;
-      return rest;
-    });
-    Toast.error(`AI 응답 오류: ${data.error}`);
-  }, []);
-
-  useEffect(() => {
-    if (!router.query.room || !currentUser) return;
-
-    let isSubscribed = true;
-
-    const setupSocket = async () => {
-      try {
-        setLoading(true);
-        setError(null);
-
-        await fetchRoomData(router.query.room);
-        const socket = await socketService.connect({
-          auth: {
-            token: currentUser.token,
-            sessionId: currentUser.sessionId
-          }
-        });
-
-        if (!isSubscribed) return;
-
-        const setupEventListeners = () => {
-          socket.removeAllListeners();
-          
-          socket.on('message', handleSocketMessage);
-          socket.on('previousMessages', handleInitialMessages);
-          socket.on('previousMessagesLoaded', handlePreviousMessagesLoaded);
-          socket.on('aiMessageStart', handleAIMessageStart);
-          socket.on('aiMessageChunk', handleAIMessageChunk);
-          socket.on('aiMessageComplete', handleAIMessageComplete);
-          socket.on('aiMessageError', handleAIMessageError);
-          socket.on('messageReactionUpdate', handleReactionUpdate);
-
-          socket.on('connect', () => {
-            setConnected(true);
-            socket.emit('joinRoom', router.query.room);
-          });
-
-          socket.on('disconnect', () => {
-            setConnected(false);
-            setHasMoreMessages(true);
-          });
-          
-          socket.on('unauthorized', handleSessionError);
-          socket.on('session_expired', handleSessionError);
-        };
-
-        setupEventListeners();
-        socketRef.current = socket;
-        setConnected(true);
-
-        await new Promise(resolve => setTimeout(resolve, 100));
-        socket.emit('joinRoom', router.query.room);
-
-      } catch (error) {
-        console.error('[Chat] Setup error:', error);
-        if (!isSubscribed) return;
-        setError(error.message || '채팅방 연결에 실패했습니다.');
-        setLoading(false);
-      }
-    };
-
-    setupSocket();
-
-    return () => {
-      isSubscribed = false;
-      if (socketRef.current) {
-        const socket = socketRef.current;
-        socket.emit('leaveRoom', router.query.room);
-        socket.removeAllListeners();
-        console.log("disconnect??");
-        socket.disconnect();
-        socketRef.current = null;
-      }
-      setMessages([]);
-      setStreamingMessages({});
-      setHasMoreMessages(true);
-      setLoadingMessages(false);
-      setInitialScrollDone(false);
-      if (loadingTimeoutRef.current) {
-        clearTimeout(loadingTimeoutRef.current);
-      }
-    };
-  }, [
-    router.query.room,
-    currentUser,
-    handleSocketMessage,
-    handleInitialMessages,
-    handlePreviousMessagesLoaded,
+  // AI Message handling hook
+  const {
+    streamingMessages,
+    setStreamingMessages,
     handleAIMessageStart,
     handleAIMessageChunk,
     handleAIMessageComplete,
     handleAIMessageError,
-    handleSessionError,
-    handleReactionUpdate
-  ]);
+    setupAIMessageListeners
+  } = useAIMessageHandling(
+    socketRef,
+    setMessages,
+    isNearBottom,
+    scrollToBottom
+  );
 
-  const handleMessageChange = useCallback((e) => {
-    const newValue = e.target.value;
-    setMessage(newValue);
+  // Message handling hook
+  const {
+    message,
+    showEmojiPicker,
+    showMentionList,
+    mentionFilter,
+    mentionIndex,
+    filePreview,
+    uploading,
+    uploadProgress,
+    uploadError,
+    setMessage,
+    setShowEmojiPicker,
+    setShowMentionList,
+    setMentionFilter,
+    setMentionIndex,
+    setFilePreview,
+    handleMessageChange,
+    handleMessageSubmit,
+    handleLoadMore,
+    handleEmojiToggle,
+    getFilteredParticipants,
+    insertMention,
+    removeFilePreview
+  } = useMessageHandling(socketRef, currentUser, router);
 
-    const cursorPosition = e.target.selectionStart;
-    const textBeforeCursor = newValue.slice(0, cursorPosition);
-    const atSymbolIndex = textBeforeCursor.lastIndexOf('@');
-
-    if (atSymbolIndex !== -1) {
-      const mentionText = textBeforeCursor.slice(atSymbolIndex + 1);
-      if (!mentionText.includes(' ')) {
-        setMentionFilter(mentionText.toLowerCase());
-        setShowMentionList(true);
-        setMentionIndex(0);
-        return;
-      }
-    }
-    
-    setShowMentionList(false);
-  }, []);
-
-  const handleMessageSubmit = useCallback(async (messageData) => {
-    if (!socketRef.current?.connected || !currentUser) {
-      console.error('[Chat] Cannot send message: Socket not connected');
-      setError('채팅 서버와 연결이 끊어졌습니다.');
-      return;
-    }
+  // Cleanup 함수 수정
+  const cleanup = useCallback((reason = 'MANUAL') => {
+    if (!mountedRef.current || !router.query.room) return;
 
     try {
-      console.log('[Chat] Sending message:', messageData);
-
-      if (messageData.type === 'file') {
-        setUploading(true);
-        setUploadError(null);
-        setUploadProgress(0);
-
-        const uploadResponse = await fileService.uploadFile(
-          messageData.fileData.file,
-          (progress) => setUploadProgress(progress)
-        );
-
-        if (!uploadResponse.success) {
-          throw new Error(uploadResponse.message || '파일 업로드에 실패했습니다.');
-        }
-
-        socketRef.current.emit('chatMessage', {
-          room: router.query.room,
-          type: 'file',
-          content: messageData.content || '',
-          fileData: {
-            _id: uploadResponse.data.file._id,
-            filename: uploadResponse.data.file.filename,
-            originalname: uploadResponse.data.file.originalname,
-            mimetype: uploadResponse.data.file.mimetype,
-            size: uploadResponse.data.file.size
-          }
-        });
-
-        setFilePreview(null);
-        setMessage('');
-        setUploading(false);
-        setUploadProgress(0);
-
-      } else if (messageData.content?.trim()) {
-        socketRef.current.emit('chatMessage', {
-          room: router.query.room,
-          type: 'text',
-          content: messageData.content.trim()
-        });
-
-        setMessage('');
+      // cleanup이 이미 진행 중인지 확인
+      if (cleanupInProgressRef.current) {
+        console.log('[Chat] Cleanup already in progress, skipping...');
+        return;
       }
 
-      setShowEmojiPicker(false);
-      setShowMentionList(false);
-      scrollToBottom('auto');
+      cleanupInProgressRef.current = true;
+      console.log(`[Chat] Starting cleanup (reason: ${reason})`);
+
+      // Socket cleanup
+      if (reason !== 'UNMOUNT' && router.query.room && socketRef.current?.connected) {
+        console.log('[Chat] Emitting leaveRoom event');
+        socketRef.current.emit('leaveRoom', router.query.room);
+      }
+
+      if (socketRef.current && reason !== 'RECONNECT') {
+        console.log('[Chat] Cleaning up socket listeners...');
+        socketRef.current.off('message');
+        socketRef.current.off('previousMessages');
+        socketRef.current.off('previousMessagesLoaded');
+        socketRef.current.off('participantsUpdate');
+        socketRef.current.off('aiMessageStart');
+        socketRef.current.off('aiMessageChunk');
+        socketRef.current.off('aiMessageComplete');
+        socketRef.current.off('aiMessageError');
+        socketRef.current.off('messageReactionUpdate');
+        socketRef.current.off('session_ended');
+        socketRef.current.off('error');
+      }
+
+      // Clear timeouts
+      if (loadMoreTimeoutRef.current) {
+        clearTimeout(loadMoreTimeoutRef.current);
+        loadMoreTimeoutRef.current = null;
+      }
+
+      // Reset refs
+      processedMessageIds.current.clear();
+      previousMessagesRef.current.clear();
+      messageProcessingRef.current = false;
+
+      // Reset states only if needed
+      if (reason === 'MANUAL' && mountedRef.current) {
+        setStreamingMessages({});
+        setError(null);
+        setLoading(false);
+        setLoadingMessages(false);
+        setMessages([]);
+        
+        if (userRooms.current.size > 0) {
+          userRooms.current.clear();
+        }
+      } else if (reason === 'DISCONNECT' && mountedRef.current) {
+        setError('채팅 연결이 끊어졌습니다. 재연결을 시도합니다.');
+      }
+
+      console.log(`[Chat] Cleanup completed (reason: ${reason})`);
 
     } catch (error) {
-      console.error('[Chat] Message submit error:', error);
-
-      if (error.message?.includes('세션') || 
-          error.message?.includes('인증') || 
-          error.message?.includes('토큰')) {
-        await handleSessionError();
-        return;
+      console.error('[Chat] Cleanup error:', error);
+      if (mountedRef.current) {
+        setError('채팅방 정리 중 오류가 발생했습니다.');
       }
-
-      setError(error.message || '메시지 전송 중 오류가 발생했습니다.');
-      if (messageData.type === 'file') {
-        setUploadError(error.message);
-        setUploading(false);
-      }
+    } finally {
+      cleanupInProgressRef.current = false;
     }
   }, [
-    currentUser,
-    router.query.room,
-    scrollToBottom,
-    handleSessionError
+    setMessages, 
+    setStreamingMessages, 
+    setError, 
+    setLoading, 
+    setLoadingMessages, 
+    mountedRef,
+    socketRef,
+    router.query.room
   ]);
+  
+  // Connection state utility
+  const getConnectionState = useCallback(() => {
+    if (!socketRef.current) return 'disconnected';
+    if (loading) return 'connecting';
+    if (error) return 'error';
+    return socketRef.current.connected ? 'connected' : 'disconnected';
+  }, [loading, error, socketRef]);
 
-  const handleEmojiToggle = useCallback(() => {
-    setShowEmojiPicker(prev => !prev);
-  }, []);
+  // Reaction handling hook
+  const {
+    handleReactionAdd,
+    handleReactionRemove,
+    handleReactionUpdate
+  } = useReactionHandling(socketRef, currentUser, messages, setMessages);
 
-  const getFilteredParticipants = useCallback(() => {
-    if (!room?.participants) return [];
-
-    const allParticipants = [
-      {
-        _id: 'wayneAI',
-        name: 'wayneAI',
-        email: 'ai@wayne.ai',
-        isAI: true
-      },
-      {
-        _id: 'consultingAI',
-        name: 'consultingAI',
-        email: 'ai@consulting.ai',
-        isAI: true
-      },
-      {
-        _id: 'AIexpert',
-        name: 'AIexpert',
-        email: 'ai@aiexpert.ai',
-        isAI: true
-      },
-      ...room.participants
-    ];
-
-    return allParticipants.filter(user => 
-      user.name.toLowerCase().includes(mentionFilter) ||
-      user.email.toLowerCase().includes(mentionFilter)
-    );
-  }, [room, mentionFilter]);
-
-  const insertMention = useCallback((user) => {
-    if (!messageInputRef.current) return;
-
-    const cursorPosition = messageInputRef.current.selectionStart;
-    const textBeforeCursor = message.slice(0, cursorPosition);
-    const atSymbolIndex = textBeforeCursor.lastIndexOf('@');
-
-    if (atSymbolIndex !== -1) {
-      const textBeforeAt = message.slice(0, atSymbolIndex);
-      const newMessage = 
-        textBeforeAt +
-        `@${user.name} ` +
-        message.slice(cursorPosition);
-
-      setMessage(newMessage);
-      setShowMentionList(false);
-
-      setTimeout(() => {
-        const newPosition = atSymbolIndex + user.name.length + 2;
-        messageInputRef.current.focus();
-        messageInputRef.current.setSelectionRange(newPosition, newPosition);
-      }, 0);
-    }
-  }, [message]);
-
-  const handleKeyDown = useCallback((e) => {
-    if (showMentionList) {
-      const filteredParticipants = getFilteredParticipants();
-      switch (e.key) {
-        case 'ArrowDown':
-          e.preventDefault();
-          setMentionIndex(prev => 
-            prev < filteredParticipants.length - 1 ? prev + 1 : 0
-          );
-          break;
-        case 'ArrowUp':
-          e.preventDefault();
-          setMentionIndex(prev => 
-            prev > 0 ? prev - 1 : filteredParticipants.length - 1
-          );
-          break;
-        case 'Enter':
-        case 'Tab':
-          e.preventDefault();
-          if (filteredParticipants.length > 0) {
-            insertMention(filteredParticipants[mentionIndex]);
-          }
-          break;
-        case 'Escape':
-          e.preventDefault();
-          setShowMentionList(false);
-          break;
-      }
-    } else if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      if (message.trim() || filePreview) {
-        handleMessageSubmit({
-          type: 'text',
-          content: message
-        });
-      }
-    }
-  }, [
-    showMentionList,
-    getFilteredParticipants,
-    mentionIndex,
-    insertMention,
-    message,
-    filePreview,
-    handleMessageSubmit
-  ]);
-
-  const handleConnectionError = useCallback(async (error) => {
-    console.error('Connection error:', error);
-    setConnected(false);
-    
-    if (error?.message?.includes('세션') || 
-        error?.message?.includes('인증') || 
-        error?.message?.includes('토큰')) {
-      await handleSessionError();
-      return;
-    }
-    
-    if (retryCount < maxRetries) {
-      const retryDelay = Math.min(1000 * Math.pow(2, retryCount), 5000);
-      console.log(`Retrying connection in ${retryDelay}ms...`);
-      
-      setTimeout(async () => {
-        try {
-          if (socketRef.current) {
-            await socketRef.current.connect();
-          }
-          setRetryCount(prev => prev + 1);
-        } catch (retryError) {
-          console.error('Retry connection failed:', retryError);
-        }
-      }, retryDelay);
-    } else {
-      Toast.error('채팅 서버에 연결할 수 없습니다. 페이지를 새로고침해주세요.');
-    }
-  }, [retryCount, maxRetries, handleSessionError]);
-
-  const handleReconnect = useCallback(async () => {
+  // 메시지 처리 유틸리티 함수
+  const processMessages = useCallback((loadedMessages, hasMore, isInitialLoad = false) => {
     try {
-      setError(null);
-      setRetryCount(0);
-      
-      if (socketRef.current) {
-        console.log("disconnect???");
-        socketRef.current.disconnect();
+      if (!Array.isArray(loadedMessages)) {
+        throw new Error('Invalid messages format');
       }
 
-      const socket = socketService.connect({
-        auth: {
-          token: currentUser.token,
-          sessionId: currentUser.sessionId
-        }
+      setMessages(prev => {
+        // 중복 메시지 필터링 개선
+        const newMessages = loadedMessages.filter(msg => {
+          if (!msg._id) return false;
+          if (processedMessageIds.current.has(msg._id)) return false;
+          processedMessageIds.current.add(msg._id);
+          return true;
+        });
+
+        // 기존 메시지와 새 메시지 결합 및 정렬
+        const allMessages = [...prev, ...newMessages].sort((a, b) => {
+          return new Date(a.timestamp || 0) - new Date(b.timestamp || 0);
+        });
+
+        // 중복 제거 (가장 최근 메시지 유지)
+        const messageMap = new Map();
+        allMessages.forEach(msg => messageMap.set(msg._id, msg));
+        return Array.from(messageMap.values());
       });
 
-      socketRef.current = socket;
-      socket.emit('joinRoom', router.query.room);
+      // 메시지 로드 상태 업데이트
+      if (isInitialLoad) {
+        setHasMoreMessages(hasMore);
+        initialLoadCompletedRef.current = true;
+        if (isNearBottom) {
+          requestAnimationFrame(() => scrollToBottom('auto'));
+        }
+      } else {
+        setHasMoreMessages(hasMore);
+      }
+
     } catch (error) {
-      console.error('Reconnection failed:', error);
+      console.error('Message processing error:', error);
+      throw error;
+    }
+  }, [setMessages, setHasMoreMessages, isNearBottom, scrollToBottom]);
+
+  // 이전 메시지 로드 함수
+  const loadPreviousMessages = useCallback(async () => {
+    if (!socketRef.current?.connected || loadingMessages) {
+      console.warn('Cannot load messages: Socket not connected or already loading');
+      return;
+    }
+
+    try {
+      setLoadingMessages(true);
+      const firstMessageTimestamp = messages[0]?.timestamp;
+
+      if (loadMoreTimeoutRef.current) {
+        clearTimeout(loadMoreTimeoutRef.current);
+      }
+
+      const responsePromise = new Promise((resolve, reject) => {
+        socketRef.current.emit('fetchPreviousMessages', {
+          roomId: router?.query?.room,
+          before: firstMessageTimestamp
+        });
+
+        socketRef.current.once('previousMessagesLoaded', resolve);
+        socketRef.current.once('error', reject);
+      });
+
+      const timeoutPromise = new Promise((_, reject) => {
+        loadMoreTimeoutRef.current = setTimeout(() => {
+          reject(new Error('Message loading timed out'));
+        }, 10000);
+      });
+
+      const response = await Promise.race([responsePromise, timeoutPromise]);
+
+      if (response.messages) {
+        processMessages(response.messages, response.hasMore, false);
+      }
+
+    } catch (error) {
+      console.error('Load previous messages error:', error);
+      Toast.error('이전 메시지를 불러오는데 실패했습니다.');
+      setHasMoreMessages(false);
+    } finally {
+      setLoadingMessages(false);
+      if (loadMoreTimeoutRef.current) {
+        clearTimeout(loadMoreTimeoutRef.current);
+      }
+    }
+  }, [socketRef, router?.query?.room, loadingMessages, messages, processMessages, setHasMoreMessages]);
+
+  // Event listeners setup
+  const setupEventListeners = useCallback(() => {
+    if (!socketRef.current || !mountedRef.current) return;
+
+    console.log('Setting up event listeners...');
+
+    // 참가자 업데이트 이벤트
+    socketRef.current.on('participantsUpdate', (participants) => {
+      if (!mountedRef.current) return;
+      console.log('Participants updated:', participants);
+      setRoom(prev => ({
+        ...prev,
+        participants: participants || []
+      }));
+    });
+
+    // 메시지 이벤트
+    socketRef.current.on('message', message => {
+      if (!message || !mountedRef.current || messageProcessingRef.current || !message._id) return;
       
-      if (error.message?.includes('세션') || 
-          error.message?.includes('인증') || 
-          error.message?.includes('토큰')) {
-        await handleSessionError();
+      if (processedMessageIds.current.has(message._id)) {
         return;
       }
+
+      console.log('Received message:', message);
+      processedMessageIds.current.add(message._id);
+
+      setMessages(prev => {
+        if (prev.some(msg => msg._id === message._id)) {
+          return prev;
+        }
+        return [...prev, message];
+      });
+
+      if (isNearBottom) {
+        scrollToBottom();
+      }
+    });
+
+    // 이전 메시지 이벤트
+    socketRef.current.on('previousMessages', (response) => {
+      if (!mountedRef.current || messageProcessingRef.current) return;
       
-      Toast.error('재연결에 실패했습니다.');
-    }
-  }, [currentUser, router.query.room, handleSessionError]);
+      try {
+        messageProcessingRef.current = true;
+        console.log('Previous messages response:', response);
 
-  const removeFilePreview = useCallback(() => {
-    setFilePreview(null);
-    setUploadError(null);
-    setUploadProgress(0);
-  }, []);
+        if (!response || typeof response !== 'object') {
+          throw new Error('Invalid response format');
+        }
 
-  // Cleanup effect
+        const { messages: loadedMessages = [], hasMore } = response;
+        const isInitialLoad = messages.length === 0;
+
+        processMessages(loadedMessages, hasMore, isInitialLoad);
+        setLoadingMessages(false);
+
+      } catch (error) {
+        console.error('Error processing messages:', error);
+        setLoadingMessages(false);
+        setError('메시지 처리 중 오류가 발생했습니다.');
+        setHasMoreMessages(false);
+      } finally {
+        messageProcessingRef.current = false;
+      }
+    });
+
+    setupAIMessageListeners();
+
+    // 리액션 이벤트
+    socketRef.current.on('messageReactionUpdate', (data) => {
+      if (!mountedRef.current) return;
+      handleReactionUpdate(data);
+    });
+
+    // 세션 이벤트
+    socketRef.current.on('session_ended', () => {
+      if (!mountedRef.current) return;
+      cleanup();
+      authService.logout();
+      router.replace('/?error=session_expired');
+    });
+
+    socketRef.current.on('error', (error) => {
+      if (!mountedRef.current) return;
+      console.error('Socket error:', error);
+      setError(error.message || '채팅 연결에 문제가 발생했습니다.');
+    });
+
+  }, [isNearBottom, scrollToBottom, messages.length, processMessages, setupAIMessageListeners, setHasMoreMessages, cleanup, router, handleReactionUpdate, setLoadingMessages, setError]);
+
+  // Room handling hook initialization
+  const {
+    setupRoom,
+    joinRoom,
+    loadInitialMessages,
+    fetchRoomData,
+    handleSessionError
+  } = useRoomHandling(
+    socketRef,
+    currentUser,
+    mountedRef,
+    router,
+    setRoom,
+    setError,
+    setMessages,
+    setHasMoreMessages,
+    setLoadingMessages,
+    setLoading,
+    setupEventListeners,
+    cleanup,
+    loading,
+    setIsInitialized,
+    initializingRef,
+    setupCompleteRef,
+    userRooms.current,
+    processMessages
+  );
+
+  // Socket connection monitoring
   useEffect(() => {
+    if (!socketRef.current || !currentUser) return;
+
+    const handleConnect = () => {
+      if (!mountedRef.current) return;
+      console.log('Socket connected successfully');
+      setConnectionStatus('connected');
+      setConnected(true);
+      
+      if (router.query.room && !setupCompleteRef.current && 
+          !initializingRef.current && !isInitialized) {
+        socketInitializedRef.current = true;
+        setupRoom().catch(error => {
+          console.error('Setup room error:', error);
+          setError('채팅방 연결에 실패했습니다.');
+        });
+      }
+    };
+
+    const handleDisconnect = (reason) => {
+      if (!mountedRef.current) return;
+      console.log('Socket disconnected:', reason);
+      setConnectionStatus('disconnected');
+      socketInitializedRef.current = false;
+      setupCompleteRef.current = false;
+    };
+
+    const handleError = (error) => {
+      if (!mountedRef.current) return;
+      console.error('Socket connection error:', error);
+      setConnectionStatus('error');
+      setError('채팅 서버와의 연결이 끊어졌습니다.');
+    };
+
+    const handleReconnecting = (attemptNumber) => {
+      if (!mountedRef.current) return;
+      console.log(`Reconnection attempt ${attemptNumber}`);
+      setConnectionStatus('connecting');
+    };
+
+    const handleReconnectSuccess = () => {
+      if (!mountedRef.current) return;
+      console.log('Reconnected successfully');
+      setConnectionStatus('connected');
+      setConnected(true);
+      setError('');
+      
+      // 재연결 시 채팅방 재접속
+      if (router.query.room) {
+        setupRoom().catch(error => {
+          console.error('Room reconnection error:', error);
+          setError('채팅방 재연결에 실패했습니다.');
+        });
+      }
+    };
+
+    socketRef.current.on('connect', handleConnect);
+    socketRef.current.on('disconnect', handleDisconnect);
+    socketRef.current.on('connect_error', handleError);
+    socketRef.current.on('reconnecting', handleReconnecting);
+    socketRef.current.on('reconnect', handleReconnectSuccess);
+
+    setConnectionStatus(socketRef.current.connected ? 'connected' : 'disconnected');
+
     return () => {
-      setStreamingMessages({});
-      setMessages([]);
-      setError(null);
-      setConnected(false);
       if (socketRef.current) {
-        console.log("disconnect?");
-        socketRef.current.disconnect();
-        socketRef.current = null;
-      }
-      if (loadingTimeoutRef.current) {
-        clearTimeout(loadingTimeoutRef.current);
+        socketRef.current.off('connect', handleConnect);
+        socketRef.current.off('disconnect', handleDisconnect);
+        socketRef.current.off('connect_error', handleError);
+        socketRef.current.off('reconnecting', handleReconnecting);
+        socketRef.current.off('reconnect', handleReconnectSuccess);
       }
     };
-  }, [router.query.room]);
+  }, [router.query.room, setupRoom, setConnected, currentUser, isInitialized, setError]);
 
-  // 컴포넌트 언마운트 시 cleanup
+  // Component initialization and cleanup
   useEffect(() => {
-    return () => {
-      if (scrollTimeoutRef.current) {
-        clearTimeout(scrollTimeoutRef.current);
+    const initializeChat = async () => {
+      if (initializingRef.current) return;
+      
+      const user = authService.getCurrentUser();
+      if (!user) {
+        router.replace('/?redirect=' + router.asPath);
+        return;
       }
-      if (loadingTimeoutRef.current) {
-        clearTimeout(loadingTimeoutRef.current);
+
+      if (!currentUser) {
+        setCurrentUser(user);
       }
-      isLoadingRef.current = false;
-      setLoadingMessages(false);
+
+      // 채팅방이 있을 때만 초기화 진행
+      if (!isInitialized && router.query.room) {
+        try {
+          initializingRef.current = true;
+          console.log('Initializing chat room...');
+          await setupRoom();
+        } catch (error) {
+          console.error('Chat initialization error:', error);
+          setError('채팅방 초기화에 실패했습니다.');
+        } finally {
+          initializingRef.current = false;
+        }
+      }
     };
-  }, []);
-  
+
+    mountedRef.current = true;
+    
+    // 라우터 쿼리가 준비되면 초기화 진행
+    if (router.query.room) {
+      initializeChat();
+    }
+
+    const tokenCheckInterval = setInterval(() => {
+      if (!mountedRef.current) return;
+      
+      const user = authService.getCurrentUser();
+      if (!user) {
+        clearInterval(tokenCheckInterval);
+        router.replace('/?redirect=' + router.asPath);
+      }
+    }, 60000);
+
+    return () => {
+      console.log('[Chat] Component unmounting...');
+      mountedRef.current = false;
+      clearInterval(tokenCheckInterval);
+      
+      if (loadMoreTimeoutRef.current) {
+        clearTimeout(loadMoreTimeoutRef.current);
+      }
+
+      // Run cleanup only if socket is connected and room exists
+      if (socketRef.current?.connected && router.query.room && !cleanupInProgressRef.current) {
+        cleanup(CLEANUP_REASONS.UNMOUNT);
+      }
+    };
+  }, [router, cleanup, setupRoom, currentUser, isInitialized, setError]);
+
+  // File handling hook
+  const {
+    fileInputRef,
+    uploading: fileUploading,
+    uploadProgress: fileUploadProgress,
+    uploadError: fileUploadError,
+    handleFileUpload,
+    handleFileSelect,
+    handleFileDrop,
+    removeFilePreview: removeFile
+  } = useFileHandling(socketRef, currentUser, router);
+
+  // Enter key handler
+  const handleKeyDown = useCallback((e) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      handleMessageSubmit(e);
+    }
+  }, [handleMessageSubmit]);
+
   return {
+    // State
     room,
     messages,
     streamingMessages,
@@ -895,24 +600,33 @@ export const useChatRoom = () => {
     uploadProgress,
     uploadError,
     isNearBottom,
-    handleLoadMore,
     hasMoreMessages,
     loadingMessages,
+    
+    // Refs
     fileInputRef,
     messageInputRef,
     messagesEndRef,
     socketRef,
+    
+    // Handlers
     handleMessageChange,
     handleMessageSubmit,
     handleEmojiToggle,
     handleKeyDown,
     handleScroll,
+    handleLoadMore: loadPreviousMessages,
     handleConnectionError,
     handleReconnect,
     getFilteredParticipants,
     insertMention,
     scrollToBottom,
     removeFilePreview,
+    handleReactionAdd,
+    handleReactionRemove,
+    cleanup,
+    
+    // Setters
     setMessage,
     setShowEmojiPicker,
     setShowMentionList,
@@ -920,8 +634,21 @@ export const useChatRoom = () => {
     setMentionIndex,
     setStreamingMessages,
     setError,
-    handleReactionAdd,
-    handleReactionRemove
+    
+    // Status
+    connectionStatus: getConnectionState(),
+    messageLoadError,
+    
+    // Retry handler
+    retryMessageLoad: useCallback(() => {
+      if (mountedRef.current) {
+        messageLoadAttemptRef.current = 0;
+        previousMessagesRef.current.clear();
+        processedMessageIds.current.clear();
+        initialLoadCompletedRef.current = false;
+        loadInitialMessages(router.query.room);
+      }
+    }, [loadInitialMessages, router.query.room])
   };
 };
 

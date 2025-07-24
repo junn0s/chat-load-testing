@@ -27,7 +27,7 @@ const StreamingMessage = ({
 const aiAvatarMapping = {
   wayneAI: { initial: 'W', name: 'Wayne AI' },
   consultingAI: { initial: 'C', name: 'Consulting AI' },
-  AIexpert: { initial: 'E', name: 'AI Expert' },
+  taxAI: { initial: 'T', name: 'Tax AI' },
 };
 
 // 기본값을 'Wayne AI'로 설정

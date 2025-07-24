@@ -37,24 +37,30 @@ const AIMessage = ({
         ? "Wayne AI"
         : msg.aiType === "consultingAI"
         ? "Consulting AI"
-        : msg.aiType === "AIexpert"
+        : msg.aiType === "taxAI"
         ? "Tax AI"
+        : msg.aiType === "algorithmAI"
+        ? "Algorithm AI"
         : "Wayne AI", // 기본값은 'Wayne AI'
     email:
       msg.aiType === "wayneAI"
         ? "ai@wayne.ai"
         : msg.aiType === "consultingAI"
         ? "ai@consulting.ai"
-        : msg.aiType === "AIexpert"
-        ? "ai@aiexpert.ai"
+        : msg.aiType === "taxAI"
+        ? "ai@tax.ai"
+        : msg.aiType === "algorithmAI"
+        ? "ai@algorithm.ai"
         : "ai@wayne.ai", // 기본 이메일은 'ai@wayne.ai'
     avatarInitial:
       msg.aiType === "wayneAI"
         ? "W"
         : msg.aiType === "consultingAI"
         ? "C"
-        : msg.aiType === "AIexpert"
-        ? "E"
+        : msg.aiType === "taxAI"
+        ? "T"
+        : msg.aiType === "algorithmAI"
+        ? "A"
         : "W", // 기본 이니셜은 'W'
   };
 

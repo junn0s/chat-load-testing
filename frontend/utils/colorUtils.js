@@ -13,8 +13,12 @@ const AI_COLORS = {
     backgroundColor: "#00C853",
     color: "#FFFFFF",
   },
-  AIexpert: {
-    backgroundColor: "#424242",
+  taxAI: {
+    backgroundColor: "#E6A545",
+    color: "#FFFFFF",
+  },
+  algorithmAI: {
+    backgroundColor: "#7E57C2",
     color: "#FFFFFF",
   },
 };
@@ -47,22 +51,19 @@ export const getAIAvatarStyles = (aiName) => {
   if (formattedName === "consultingai") {
     return AI_COLORS.consultingAI;
   }
-  if (formattedName === "aiexpert") {
-    return AI_COLORS.AIexpert;
+  if (formattedName === "taxai") {
+    return AI_COLORS.taxAI;
   }
-
+  if (formattedName === "algorithmai") {
+    return AI_COLORS.algorithmAI;
+  }
   // 알 수 없는 AI의 경우 기본값 반환
   return AI_COLORS.wayneAI;
 };
 
 // 이메일로부터 고유한 색상 생성
 export const generateColorFromEmail = (email) => {
-  if (!email) return "#0084ff";
-
-  // 캐시된 색상이 있는지 확인
-  if (globalColorCache.has(email)) {
-    return globalColorCache.get(email);
-  }
+  if (!email) return "#E6A545";
 
   // AI 계정 처리
   if (email.endsWith("@wayne.ai")) {
@@ -73,11 +74,14 @@ export const generateColorFromEmail = (email) => {
     globalColorCache.set(email, AI_COLORS.consultingAI.backgroundColor);
     return AI_COLORS.consultingAI.backgroundColor;
   }
-  if (email.endsWith("@aiexpert.ai")) {
-    globalColorCache.set(email, AI_COLORS.AIexpert.backgroundColor);
-    return AI_COLORS.AIexpert.backgroundColor;
+  if (email.endsWith("@tax.ai")) {
+    globalColorCache.set(email, AI_COLORS.taxAI.backgroundColor);
+    return AI_COLORS.taxAI.backgroundColor;
   }
-
+  if (email.endsWith("@algorithm.ai")) {
+    globalColorCache.set(email, AI_COLORS.algorithmAI.backgroundColor);
+    return AI_COLORS.algorithmAI.backgroundColor;
+  }
   // 해시 생성
   let hash = 0;
   for (let i = 0; i < email.length; i++) {

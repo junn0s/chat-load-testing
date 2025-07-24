@@ -1,23 +1,12 @@
-import React, { useCallback, memo, useRef, useEffect } from "react";
-import { Avatar } from "@vapor-ui/core";
-import {
-  getAIAvatarStyles,
-  generateColorFromEmail,
-  getContrastTextColor,
-} from "../../utils/colorUtils";
+import React, { useCallback, memo, useRef, useEffect } from 'react';
+import { Avatar } from '@vapor-ui/core';
+import { getAIAvatarStyles, generateColorFromEmail, getContrastTextColor } from '../../utils/colorUtils';
 
-const imageOverlayStyle = {
-  width: "100%",
-  height: "100%",
-  objectFit: "cover",
-  borderRadius: "inherit",
-};
-
-const MentionDropdown = ({
-  participants = [],
-  activeIndex = 0,
-  onSelect = () => {},
-  onMouseEnter = () => {},
+const MentionDropdown = ({ 
+  participants = [], 
+  activeIndex = 0, 
+  onSelect = () => {}, 
+  onMouseEnter = () => {}
 }) => {
   const dropdownRef = useRef(null);
   const itemRefs = useRef([]);
@@ -28,7 +17,7 @@ const MentionDropdown = ({
 
     const container = dropdownRef.current;
     const activeItem = itemRefs.current[activeIndex];
-
+    
     // 활성 항목의 위치 계산
     const itemTop = activeItem.offsetTop;
     const itemBottom = itemTop + activeItem.offsetHeight;
@@ -39,12 +28,12 @@ const MentionDropdown = ({
     if (itemTop < containerTop) {
       container.scrollTo({
         top: itemTop,
-        behavior: "smooth",
+        behavior: 'smooth'
       });
     } else if (itemBottom > containerBottom) {
       container.scrollTo({
         top: itemBottom - container.offsetHeight,
-        behavior: "smooth",
+        behavior: 'smooth'
       });
     }
   }, [activeIndex]);
@@ -57,24 +46,28 @@ const MentionDropdown = ({
       return {
         backgroundColor: aiStyles.backgroundColor,
         color: aiStyles.color,
-        boxShadow: "0 2px 4px rgba(0, 0, 0, 0.2)",
+        boxShadow: '0 2px 4px rgba(0, 0, 0, 0.2)'
       };
     }
-
+    
     const backgroundColor = generateColorFromEmail(user.email);
     const color = getContrastTextColor(backgroundColor);
-    return {
-      backgroundColor,
+    return { 
+      backgroundColor, 
       color,
-      boxShadow: "0 2px 4px rgba(0, 0, 0, 0.1)",
+      boxShadow: '0 2px 4px rgba(0, 0, 0, 0.1)'
     };
   }, []);
 
   const renderUserBadge = useCallback((user) => {
     if (user.isAI) {
-      return <span className="mention-badge ai">AI 어시스턴트</span>;
+      return (
+        <span className="mention-badge ai">
+          AI 어시스턴트
+        </span>
+      );
     }
-
+    
     return (
       <span className="mention-badge user" title={user.email}>
         {user.email}
@@ -84,79 +77,73 @@ const MentionDropdown = ({
 
   const getAvatarContent = useCallback((user) => {
     if (user.isAI) {
-      return user.name === "wayneAI"
-        ? "ai/wayne.webp"
-        : user.name === "consultingAI"
-        ? "ai/consult.webp"
-        : user.name === "AIexpert"
-        ? "ai/ai_dr.webp"
-        : "ai/wayne.webp";
+      if (user.name === 'wayneAI') return 'W';
+      if (user.name === 'consultingAI') return 'C';
+      if (user.name === 'taxAI') return 'T'; 
+      if (user.name === 'algorithmAI') return 'A';
+      return 'M';
     }
     return user.name.charAt(0).toUpperCase();
   }, []);
 
-  const handleKeyDown = useCallback(
-    (e, user) => {
-      if (e.key === "Enter" || e.key === " ") {
-        e.preventDefault();
-        onSelect(user);
-      }
-    },
-    [onSelect]
-  );
+  const handleKeyDown = useCallback((e, user) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      onSelect(user);
+    }
+  }, [onSelect]);
 
   if (!participants?.length) return null;
 
   return (
-    <div
-      className="mention-dropdown"
-      role="listbox"
+    <div 
+      className="mention-dropdown" 
+      role="listbox" 
       aria-label="멘션할 사용자 목록"
       ref={dropdownRef}
     >
       {participants.map((user, index) => (
         <div
           key={user._id || `ai-${user.name}`}
-          ref={(el) => (itemRefs.current[index] = el)}
+          ref={el => itemRefs.current[index] = el}
           role="option"
           aria-selected={index === activeIndex}
           tabIndex={0}
-          className={`mention-item ${index === activeIndex ? "active" : ""}`}
+          className={`mention-item ${index === activeIndex ? 'active' : ''}`}
           onClick={() => onSelect(user)}
           onKeyDown={(e) => handleKeyDown(e, user)}
           onMouseEnter={() => onMouseEnter(index)}
         >
           <div className="mention-item-content">
-            <Avatar
-              size="lg"
-              style={getAvatarStyles(user)}
-              className="mention-avatar"
+            <Avatar.Root
+              size="sm"
+              style={{
+                ...getAvatarStyles(user),
+                flexShrink: 0
+              }}
               aria-label={`${user.name}의 아바타`}
             >
-              {user.isAI ? (
-                <Avatar.Image
-                  src={getAvatarContent(user)}
-                  alt={`${user?.name}'s profile`}
-                  style={imageOverlayStyle}
-                  loading="lazy"
-                />
-              ) : (
-                getAvatarContent(user)
-              )}
-            </Avatar>
-
+              <Avatar.Fallback style={getAvatarStyles(user)}>
+                {getAvatarContent(user)}
+              </Avatar.Fallback>
+            </Avatar.Root>
+            
             <div className="mention-info">
               <span className="mention-name">
-                {user.isAI
-                  ? user.name === "wayneAI"
-                    ? "Wayne AI"
-                    : user.name === "consultingAI"
-                    ? "Consulting AI"
-                    : user.name === "AIexpert"
-                    ? "AI 척척박사"
-                    : user.name
-                  : user.name}
-              </span>
+    {user.isAI ? (
+      user.name === 'wayneAI'
+        ? 'Wayne AI'
+        : user.name === 'consultingAI'
+        ? 'Consulting AI'
+        : user.name === 'taxAI'
+        ? 'Tax AI'
+        : user.name === 'algorithmAI'
+        ? 'Algorithm AI'
+        : user.name
+    ) : (
+      user.name
+    )}
+  </span>
               {renderUserBadge(user)}
             </div>
           </div>

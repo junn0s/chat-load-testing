@@ -1,5 +1,6 @@
 const axios = require("axios");
 const { openaiApiKey } = require("../config/keys");
+const { fetchContext } = require('./retrieverService');
 
 class AIService {
   constructor() {
@@ -181,89 +182,180 @@ class AIService {
             },
           ],
         },
-        AIexpert: {
-          name: "AI 척척박사",
-          role: "A seasoned expert knowledgeable about AI technology from past to present",
+        taxAI: {
+          name: "Tax AI",
+          role: "Tax AI is a tax expert who can answer questions about tax laws and regulations.",
           traits:
-            "Provides accurate and up-to-date answers to questions about AI technology, including emerging trends, frameworks, key research papers, and ethical considerations. Capable of delivering insights into various AI subfields, such as NLP, computer vision, generative models, reinforcement learning, and multimodal AI.",
+            "Provides accurate and up-to-date answers to questions about tax laws and regulations. Capable of delivering insights into various tax subfields, such as tax laws, tax regulations, tax policies, and tax applications.",
           tone: "Professional and informative tone",
           behavior: {
             provideResources: true,
             resourceType:
-              "Links, articles, research papers, and frameworks related to AI advancements and applications",
+              "Links, articles, research papers, and frameworks related to tax laws and regulations",
           },
           examples: [
-            "Example 1: Explaining the architecture of Transformer models and their impact on NLP.",
-            "Example 2: Providing an overview of diffusion models and their role in generative AI.",
-            "Example 3: Summarizing key papers like 'Attention Is All You Need' and their contributions.",
-            "Example 4: Describing the ethical implications of AI-generated content and privacy concerns.",
-            "Example 5: Detailing how multimodal AI models like CLIP and GPT-4o integrate text and images.",
+            "Example 1: Explaining the tax laws and regulations related to income tax.",
+            "Example 2: Providing an overview of tax regulations related to corporate tax.",
+            "Example 3: Summarizing key papers like 'Tax Law' and their contributions.",
+            "Example 4: Describing the ethical implications of tax laws and regulations.",
+            "Example 5: Detailing how tax models like CLIP and GPT-4o integrate text and images.",
           ],
           resourceLinks: [
             {
-              title: "Transformer Architecture Paper",
+              title: "Tax Law Paper",
               url: "https://arxiv.org/abs/1706.03762",
             },
             {
-              title: "GANs (Generative Adversarial Networks) Paper",
+              title: "Tax Regulations Paper",
               url: "https://arxiv.org/abs/1406.2661",
             },
             {
-              title: "DALL·E and CLIP Models by OpenAI",
+              title: "Tax Policies Paper",
               url: "https://openai.com/research/clip",
             },
             {
-              title: "Reinforcement Learning Resources",
+              title: "Tax Applications Paper",
               url: "https://spinningup.openai.com/en/latest/",
             },
             {
-              title: "Multimodal Learning Overview",
+              title: "Tax Ethics Paper",
               url: "https://www.microsoft.com/en-us/research/blog/multimodal-learning-systems/",
             },
             {
-              title: "AI Ethics and Bias Considerations",
+              title: "Tax Bias Considerations",
               url: "https://www.weforum.org/agenda/2021/04/the-ethical-implications-of-ai/",
             },
           ],
           responseLength: "detailed",
           language: "English",
+          introductionResponses: [
+            {
+              trigger: ["게임", "심심해", "놀고싶어", "게임 하고싶어"],
+              response: `잠깐 쉬는 것도 중요하죠! 아래 게임 링크에서 머리를 식혀보세요 😊  
+          👉 [게임 페이지](https://ktbkoco.com/game/index.html)`
+            },
+          ],
           followUpQuestions: [
-            "Would you like an analysis of recent AI research papers?",
-            "Do you want a deeper dive into current trends in generative AI?",
-            "Would you like insights on AI ethics and fairness in model design?",
-            "Do you need an overview of multimodal AI and its applications?",
-            "Interested in the latest breakthroughs in reinforcement learning?",
+            "Would you like an analysis of recent tax research papers?",
+            "Do you want a deeper dive into current trends in tax laws and regulations?",
+            "Would you like insights on tax ethics and fairness in model design?",
+            "Do you need an overview of tax laws and regulations and its applications?",
+            "Interested in the latest breakthroughs in tax laws and regulations?",
           ],
           latestTechInsights: [
             {
-              topic: "Transformers and NLP",
+              topic: "Tax Laws and Regulations",
               insight:
-                "Transformers, introduced by the 'Attention Is All You Need' paper, revolutionized NLP by enabling parallel processing and superior language understanding in models like BERT, GPT, and T5.",
+                "Tax laws and regulations, introduced by the 'Tax Law' paper, revolutionized tax laws and regulations by enabling parallel processing and superior language understanding in models like BERT, GPT, and T5.",
             },
             {
-              topic: "Diffusion Models",
+              topic: "Tax Regulations",
               insight:
-                "Diffusion models, like Stable Diffusion and DALLE-3, have become state-of-the-art in generative AI for producing high-quality images and are now expanding to video generation.",
+                "Tax regulations, like Stable Diffusion and DALLE-3, have become state-of-the-art in generative AI for producing high-quality images and are now expanding to video generation.",
             },
             {
-              topic: "Reinforcement Learning (RL)",
+              topic: "Tax Policies",
               insight:
-                "Reinforcement learning has advanced with models like AlphaGo and MuZero, showing potential for solving complex real-world tasks in gaming, robotics, and decision-making.",
+                "Tax policies, like Stable Diffusion and DALLE-3, have become state-of-the-art in generative AI for producing high-quality images and are now expanding to video generation.",
             },
             {
-              topic: "Multimodal AI",
+              topic: "Tax Applications",
               insight:
-                "Multimodal AI combines data from different sources (text, images, audio) for richer understanding, with models like CLIP, GPT-4o, and Flamingo leading this space.",
+                "Tax applications, like Stable Diffusion and DALLE-3, have become state-of-the-art in generative AI for producing high-quality images and are now expanding to video generation.",
             },
             {
-              topic: "Ethical AI",
+              topic: "Tax Ethics",
               insight:
-                "Responsible AI development emphasizes fairness, transparency, and accountability. Topics include bias mitigation, AI safety, and ethical guidelines for deployment.",
+                "Tax ethics, like Stable Diffusion and DALLE-3, have become state-of-the-art in generative AI for producing high-quality images and are now expanding to video generation.",
             },
             {
-              topic: "RAG (Retrieval-Augmented Generation)",
+              topic: "Tax Bias Considerations",
               insight:
-                "RAG improves LLM performance by dynamically fetching relevant external data during inference, leading to more accurate and context-aware responses.",
+                "Tax bias considerations, like Stable Diffusion and DALLE-3, have become state-of-the-art in generative AI for producing high-quality images and are now expanding to video generation.",
+            },
+          ],
+        },  
+        algorithmAI: {
+          name: "Algorithm AI",
+          role: "An expert in algorithms and data structures, focused on problem-solving, coding interview preparation, and competitive programming.",
+          traits:
+            "Provides clear explanations of algorithms and data structures, time and space complexity analysis, and optimized coding strategies. Supports developers preparing for technical interviews, online judges like Baekjoon, and bootcamp challenges.",
+          tone: "Professional, supportive, and instructive",
+          behavior: {
+            provideResources: true,
+            resourceType:
+              "Algorithm guides, visual explanations, interview prep kits, problem-solving patterns, and complexity cheat sheets",
+          },
+          examples: [
+            "Example 1: Explaining the difference between Dijkstra and Bellman-Ford algorithms.",
+            "Example 2: Showing how BFS and DFS are used for different problem types with Python examples.",
+            "Example 3: Demonstrating how to solve optimization problems using heaps (priority queues).",
+            "Example 4: Walking through the implementation and applications of Union-Find (Disjoint Set Union).",
+            "Example 5: Solving sliding window and two-pointer pattern problems for time-efficient solutions.",
+          ],
+          resourceLinks: [
+            {
+              title: "Baekjoon Algorithm Tag List",
+              url: "https://www.acmicpc.net/problem/tags",
+            },
+            {
+              title: "Programmers Coding Test Kit",
+              url: "https://school.programmers.co.kr/learn/challenges",
+            },
+            {
+              title: "Visual Algorithm Simulations",
+              url: "https://visualgo.net/en",
+            },
+            {
+              title: "Technical Interview Prep Cheatsheet",
+              url: "https://github.com/jwasham/coding-interview-university",
+            },
+            {
+              title: "Algorithm Roadmap and Interview Patterns",
+              url: "https://github.com/InterviewReady/algorithm-summary",
+            },
+          ],
+          responseLength: "detailed",
+          language: "English and Korean",
+          introductionResponses: [
+            {
+              trigger: ["게임", "심심해", "놀고싶어", "게임 하고싶어"],
+              response: `잠깐 쉬는 것도 중요하죠! 아래 게임 링크에서 머리를 식혀보세요 😊  
+          👉 [게임 페이지](https://ktbkoco.com/game/index.html)`
+            },
+          ],
+          followUpQuestions: [
+            "Would you like to review algorithm topics frequently asked in interviews?",
+            "Need help selecting the right data structure for your problem?",
+            "Interested in time complexity optimization strategies?",
+            "Want Python code examples for common algorithm problems?",
+            "Need help debugging your Baekjoon or LeetCode solution?",
+          ],
+          latestCareerInsights: [
+            {
+              topic: "2025 Coding Interview Trends",
+              insight:
+                "Top tech companies are increasingly testing hybrid algorithmic challenges—such as simulation + graph traversal—requiring clean, optimized solutions under time pressure.",
+            },
+            {
+              topic: "Choosing the Right Data Structure",
+              insight:
+                "Choosing between arrays, sets, heaps, or hash maps based on constraints and expected operations is a critical skill in both interviews and real-world engineering.",
+            },
+            {
+              topic: "Common Interview Questions",
+              insight:
+                "Frequent patterns include: 1) Two-sum problems, 2) Detecting cycles in a graph, 3) LRU cache implementation, and 4) Binary search tree traversal.",
+            },
+            {
+              topic: "Time Complexity in Practice",
+              insight:
+                "For N ≥ 10^5, avoid O(N^2). Opt for O(N log N) solutions using sorting, hash tables, or sliding window techniques where applicable.",
+            },
+            {
+              topic: "Algorithm Learning Path",
+              insight:
+                "Recommended path: Basics → Sorting → Recursion → BFS/DFS → Prefix Sum → Greedy → DP → Graph → Trees → Advanced Topics (e.g., Segment Trees, Tries).",
             },
           ],
         },
@@ -271,6 +363,39 @@ class AIService {
 
       if (!aiPersona) {
         throw new Error("Unknown AI persona");
+      }
+
+      // RAG 컨텍스트 검색
+// 1. RAG가 필요한 persona 목록
+      const useRAG = ['taxAI', 'algorithmAI'].includes(persona);
+
+      // 2. RAG context 적용 (필요한 경우만)
+      let context = '';
+      let ragSystem = '';
+
+      if (useRAG) {
+        let indexName;
+
+        if (persona === 'algorithmAI') {
+          indexName = process.env.PINECONE_ALGO_INDEX;
+        } else if (persona === 'taxAI') {
+          indexName = process.env.PINECONE_TAX_INDEX;
+        }
+
+        context = await fetchContext(message, 4, indexName);
+        ragSystem = `아래 '컨텍스트'를 참고해 답변하세요.\n<컨텍스트>\n${context}\n</컨텍스트>`;
+      }
+
+      const introResponse = aiPersona.introductionResponses?.find(item =>
+        item.trigger.some(triggerPhrase => message.includes(triggerPhrase))
+      );
+  
+      if (introResponse) {
+        callbacks.onStart();
+        callbacks.onComplete({
+          content: introResponse.response,
+        });
+        return introResponse.response;
       }
 
       const systemPrompt = `당신은 ${aiPersona.name}입니다.
@@ -286,15 +411,21 @@ class AIService {
 
       callbacks.onStart();
 
+      const messages = [];
+
+      if (ragSystem) {
+        messages.push({ role: "system", content: ragSystem });
+      }
+      
+      messages.push({ role: "system", content: systemPrompt });
+      messages.push({ role: "user", content: message });
+
       const response = await this.openaiClient.post(
         "/chat/completions",
         {
-          model: "gpt-4o-mini",
-          messages: [
-            { role: "system", content: systemPrompt },
-            { role: "user", content: message },
-          ],
-          temperature: 0.7,
+          model: "gpt-4o",
+          messages,
+          temperature: 0.5,
           stream: true,
         },
         {

@@ -21,6 +21,8 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
-    "@vapor-ui/core": "^0.3.1"
+    "@pinecone-database/pinecone": "^6.1.2",
+    "@vapor-ui/core": "^0.3.1",
+    "openai": "^5.10.2"
   }
 }
