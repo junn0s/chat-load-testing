@@ -178,8 +178,8 @@ export const useMessageHandling = (socketRef, currentUser, router, handleSession
    const AI_BOTS = [
     { _id: 'wayneAI',       name: 'wayneAI',       email: 'ai@wayne.ai',       isAI: true },
     { _id: 'consultingAI',  name: 'consultingAI',  email: 'ai@consulting.ai',  isAI: true },
-    { _id: 'taxAI',      name: 'taxAI',      email: 'ai@tax.ai',    isAI: true },
-    { _id: 'algorithmAI',  name: 'algorithmAI',  email: 'ai@algorithm.ai',  isAI: true }
+    { _id: 'summaryAI',     name: 'summaryAI',     email: 'ai@summary.ai',     isAI: true },
+    { _id: 'kocoAI',        name: 'kocoAI',        email: 'ai@koco.ai',        isAI: true }
   ];
   
     const allParticipants = [...AI_BOTS, ...room.participants];

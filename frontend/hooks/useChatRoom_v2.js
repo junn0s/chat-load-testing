@@ -690,9 +690,15 @@ export const useChatRoom = () => {
         isAI: true
       },
       {
-        _id: 'taxAI',
-        name: 'taxAI',
-        email: 'ai@tax.ai',
+        _id: 'summaryAI',
+        name: 'summaryAI',
+        email: 'ai@summary.ai',
+        isAI: true
+      },
+      {
+        _id: 'kocoAI',
+        name: 'kocoAI',
+        email: 'ai@koco.ai',
         isAI: true
       },
       ...room.participants
